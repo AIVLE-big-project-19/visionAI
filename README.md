@@ -94,7 +94,7 @@ Vision AI Server는 **이미지 1장당 1회 추론**하도록 설계되어 있�
 ```powershell
 pip install -r requirements.txt
 
-$env:MODEL_PATH="C:\models\best.pt"
+$env:MODEL_PATH="C:\models\bestv2.pt"
 $env:MODEL_VERSION="solar-yolov8-seg-v1"
 
 uvicorn app.main:app --host 0.0.0.0 --port 8000
@@ -184,7 +184,7 @@ AI Server는 설치 가능한 영역을 탐지하여 JSON 배열 형태로 반�
 ```json
 [
   {
-    "candidate_type": "bare_land",
+    "candidate_type": "land",
     "confidence": 0.9231,
     "polygon": [
       [14135200.5, 4518750.2]
@@ -226,8 +226,7 @@ AI Server는 설치 가능한 영역을 탐지하여 JSON 배열 형태로 반�
 - 대상 클래스
   - building
   - parking_lot
-  - bare_land
-  - farmland
+  - land
 
 ---
 

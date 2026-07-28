@@ -12,7 +12,7 @@ from .config import Settings
 
 
 # Kept from the existing notebook: only these detected classes are candidates.
-INSTALLABLE = {"building", "parking_lot", "bare_land", "farmland"}
+INSTALLABLE = {"building", "parking_lot", "land"}
 
 
 @dataclass(frozen=True)
