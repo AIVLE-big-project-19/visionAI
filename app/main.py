@@ -19,6 +19,18 @@ class Prediction(BaseModel):
     polygon: list[list[float]] = Field(description="Segmentation vertices in EPSG:3857 [x, y].")
     pixel_area: float
     real_area: float = Field(description="Area in square metres, calculated from extent3857.")
+    distance_to_road_px: float | None = Field(
+        description="Shortest distance from a land polygon to a detected road, in pixels."
+    )
+    distance_to_building_px: float | None = Field(
+        description="Shortest distance from a land polygon to a detected building, in pixels."
+    )
+    distance_to_road_m: float | None = Field(
+        description="Shortest distance from a land polygon to a detected road, in metres."
+    )
+    distance_to_building_m: float | None = Field(
+        description="Shortest distance from a land polygon to a detected building, in metres."
+    )
     model_version: str
 
 

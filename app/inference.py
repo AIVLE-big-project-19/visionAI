@@ -6,6 +6,8 @@ from typing import Any
 
 import cv2
 import numpy as np
+from shapely.geometry import Polygon
+from shapely.geometry.base import BaseGeometry
 from ultralytics import YOLO
 
 from .config import Settings
@@ -61,6 +63,29 @@ class YoloSegmentationService:
         confidences = result.boxes.conf.cpu().numpy()
         candidates: list[dict[str, Any]] = []
 
+        # The updated model logic uses every detected road/building polygon as
+        # the distance target. These are not limited to installable candidates.
+        road_polygons_px: list[BaseGeometry] = []
+        building_polygons_px: list[BaseGeometry] = []
+        road_polygons_m: list[BaseGeometry] = []
+        building_polygons_m: list[BaseGeometry] = []
+
+        for polygon, class_id in zip(polygons, classes):
+            detected_type = result.names[int(class_id)]
+            pixel_geometry = self._to_geometry(polygon)
+            map_geometry = self._to_geometry(
+                self._to_3857_polygon(polygon, width, height, extent)
+            )
+            if pixel_geometry is None or map_geometry is None:
+                continue
+
+            if detected_type == "road":
+                road_polygons_px.append(pixel_geometry)
+                road_polygons_m.append(map_geometry)
+            elif detected_type == "building":
+                building_polygons_px.append(pixel_geometry)
+                building_polygons_m.append(map_geometry)
+
         for polygon, class_id, confidence in zip(polygons, classes, confidences):
             candidate_type = result.names[int(class_id)]
             if candidate_type not in INSTALLABLE or float(confidence) < self._settings.min_confidence:
@@ -72,6 +97,35 @@ class YoloSegmentationService:
             if pixel_area < self._settings.min_pixel_area:
                 continue
 
+            distance_to_road_px: float | None = None
+            distance_to_building_px: float | None = None
+            distance_to_road_m: float | None = None
+            distance_to_building_m: float | None = None
+
+            # Retain the supplied logic: distances are relevant only to land.
+            if candidate_type == "land":
+                pixel_geometry = self._to_geometry(polygon)
+                map_geometry = self._to_geometry(
+                    self._to_3857_polygon(polygon, width, height, extent)
+                )
+                if pixel_geometry is not None and map_geometry is not None:
+                    if road_polygons_px:
+                        distance_to_road_px = min(
+                            pixel_geometry.distance(road) for road in road_polygons_px
+                        )
+                        distance_to_road_m = min(
+                            map_geometry.distance(road) for road in road_polygons_m
+                        )
+                    if building_polygons_px:
+                        distance_to_building_px = min(
+                            pixel_geometry.distance(building)
+                            for building in building_polygons_px
+                        )
+                        distance_to_building_m = min(
+                            map_geometry.distance(building)
+                            for building in building_polygons_m
+                        )
+
             candidates.append(
                 {
                     "candidate_type": candidate_type,
@@ -80,6 +134,10 @@ class YoloSegmentationService:
                     "polygon": self._to_3857_polygon(polygon, width, height, extent),
                     "pixel_area": round(pixel_area, 2),
                     "real_area": round(self._real_area(pixel_area, width, height, extent), 2),
+                    "distance_to_road_px": self._round_or_none(distance_to_road_px),
+                    "distance_to_building_px": self._round_or_none(distance_to_building_px),
+                    "distance_to_road_m": self._round_or_none(distance_to_road_m),
+                    "distance_to_building_m": self._round_or_none(distance_to_building_m),
                     "model_version": self._settings.model_version,
                 }
             )
@@ -103,3 +161,16 @@ class YoloSegmentationService:
             map_y = extent.max_y - (float(pixel_y) / height) * (extent.max_y - extent.min_y)
             converted.append([round(map_x, 3), round(map_y, 3)])
         return converted
+
+    @staticmethod
+    def _to_geometry(points: np.ndarray | list[list[float]]) -> BaseGeometry | None:
+        if len(points) < 3:
+            return None
+        geometry = Polygon(points)
+        if not geometry.is_valid:
+            geometry = geometry.buffer(0)
+        return None if geometry.is_empty else geometry
+
+    @staticmethod
+    def _round_or_none(value: float | None) -> float | None:
+        return None if value is None else round(value, 2)
