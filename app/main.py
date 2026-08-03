@@ -31,6 +31,18 @@ class Prediction(BaseModel):
     distance_to_building_m: float | None = Field(
         description="Shortest distance from a land polygon to a detected building, in metres."
     )
+    shape_score: float = Field(description="Panel-placement suitability score based on polygon shape.")
+    shape_grade: str = Field(description="Shape suitability grade from A (best) to E.")
+    shape_efficiency: float = Field(
+        description="Usable-area efficiency derived from the shape grade."
+    )
+    recommended_layout: str = Field(description="Recommended panel orientation: Landscape or Portrait.")
+    usable_area: float = Field(
+        description="Area in square metres after shape and packing efficiencies are applied."
+    )
+    estimated_panel_count: int = Field(
+        description="Estimated count of 550W panels that fit in the usable area."
+    )
     model_version: str
 
 

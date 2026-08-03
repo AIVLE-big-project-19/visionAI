@@ -25,6 +25,10 @@ OVERLAY_COLORS: dict[str, tuple[int, int, int]] = {
 }
 OVERLAY_FILL_ALPHA = 0.35
 
+# 550W module footprint and a conservative allowance for spacing/placement.
+PANEL_AREA_M2 = 2.58
+PACKING_FACTOR = 0.90
+
 
 WATERMARK_WIDTH_FRACTION = 0.24
 WATERMARK_HEIGHT_FRACTION = 0.10
@@ -122,6 +126,13 @@ class YoloSegmentationService:
 
             annotated_polygons_px.append((polygon_int, candidate_type))
 
+            shape_info = self._calculate_shape_features(polygon)
+            real_area = self._real_area(pixel_area, width, height, extent)
+            usable_area = (
+                real_area * shape_info["shape_efficiency"] * PACKING_FACTOR
+            )
+            estimated_panel_count = int(usable_area / PANEL_AREA_M2)
+
             distance_to_road_px: float | None = None
             distance_to_building_px: float | None = None
             distance_to_road_m: float | None = None
@@ -158,11 +169,17 @@ class YoloSegmentationService:
                     # Coordinates are converted from image pixels to EPSG:3857.
                     "polygon": self._to_3857_polygon(polygon, width, height, extent),
                     "pixel_area": round(pixel_area, 2),
-                    "real_area": round(self._real_area(pixel_area, width, height, extent), 2),
+                    "real_area": round(real_area, 2),
                     "distance_to_road_px": self._round_or_none(distance_to_road_px),
                     "distance_to_building_px": self._round_or_none(distance_to_building_px),
                     "distance_to_road_m": self._round_or_none(distance_to_road_m),
                     "distance_to_building_m": self._round_or_none(distance_to_building_m),
+                    "shape_score": shape_info["shape_score"],
+                    "shape_grade": shape_info["shape_grade"],
+                    "shape_efficiency": shape_info["shape_efficiency"],
+                    "recommended_layout": shape_info["recommended_layout"],
+                    "usable_area": round(usable_area, 2),
+                    "estimated_panel_count": estimated_panel_count,
                     "model_version": self._settings.model_version,
                 }
             )
@@ -196,6 +213,53 @@ class YoloSegmentationService:
         meters_per_pixel_x = (extent.max_x - extent.min_x) / width
         meters_per_pixel_y = (extent.max_y - extent.min_y) / height
         return pixel_area * meters_per_pixel_x * meters_per_pixel_y
+
+    @staticmethod
+    def _calculate_shape_features(polygon: np.ndarray) -> dict[str, float | str]:
+        """Calculate the shape quality used to estimate panel placement.
+
+        The metrics follow the supplied notebook, but OpenCV's convex hull is
+        used so the API does not need an additional SciPy dependency.
+        """
+        polygon_float = polygon.astype(np.float32)
+        polygon_area = float(cv2.contourArea(polygon_float))
+        hull = cv2.convexHull(polygon_float)
+        hull_area = float(cv2.contourArea(hull))
+        solidity = polygon_area / hull_area if hull_area > 0 else 0.0
+
+        x, y, width, height = cv2.boundingRect(polygon.astype(np.int32))
+        del x, y  # Only dimensions are required for the shape metrics.
+        bbox_area = width * height
+        fill_ratio = polygon_area / bbox_area if bbox_area > 0 else 0.0
+        aspect_ratio = max(width, height) / max(1, min(width, height))
+
+        if aspect_ratio < 1.5:
+            aspect_score = 1.0
+        elif aspect_ratio < 2.5:
+            aspect_score = 0.9
+        elif aspect_ratio < 4.0:
+            aspect_score = 0.8
+        else:
+            aspect_score = 0.7
+
+        shape_score = solidity * 0.5 + fill_ratio * 0.3 + aspect_score * 0.2
+        if shape_score >= 0.90:
+            shape_grade, shape_efficiency = "A", 0.95
+        elif shape_score >= 0.80:
+            shape_grade, shape_efficiency = "B", 0.90
+        elif shape_score >= 0.70:
+            shape_grade, shape_efficiency = "C", 0.85
+        elif shape_score >= 0.60:
+            shape_grade, shape_efficiency = "D", 0.80
+        else:
+            shape_grade, shape_efficiency = "E", 0.70
+
+        return {
+            "shape_score": round(shape_score, 3),
+            "shape_grade": shape_grade,
+            "shape_efficiency": shape_efficiency,
+            "recommended_layout": "Landscape" if width >= height else "Portrait",
+        }
 
     @staticmethod
     def _to_3857_polygon(
