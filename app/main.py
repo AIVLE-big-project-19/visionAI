@@ -34,6 +34,13 @@ class Prediction(BaseModel):
     model_version: str
 
 
+class PredictResponse(BaseModel):
+    predictions: list[Prediction]
+    annotated_image: str = Field(
+        description="Base64-encoded PNG of the input image with detected polygons overlaid."
+    )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # The model is loaded once per FastAPI process, never per request.
@@ -73,23 +80,40 @@ def parse_extent3857(value: str) -> Extent3857:
         ) from exc
 
 
-@app.post("/predict", response_model=list[Prediction])
+@app.post("/predict", response_model=PredictResponse)
 async def predict(
     request: Request,
     image: Annotated[UploadFile, File(description="PNG/JPEG map image")],
     extent3857: Annotated[str, Form(description="Map extent in EPSG:3857")],
-) -> list[dict[str, Any]]:
+) -> dict[str, Any]:
+
     if image.content_type and not image.content_type.startswith("image/"):
-        raise HTTPException(status_code=415, detail="image must be an image file.")
+        raise HTTPException(
+            status_code=415,
+            detail="image must be an image file.",
+        )
 
     raw_image = await image.read()
+
     try:
-        decoded = cv2.imdecode(np.frombuffer(raw_image, dtype=np.uint8), cv2.IMREAD_COLOR)
+        decoded = cv2.imdecode(
+            np.frombuffer(raw_image, dtype=np.uint8),
+            cv2.IMREAD_COLOR,
+        )
     finally:
         await image.close()
 
     if decoded is None:
-        raise HTTPException(status_code=422, detail="image could not be decoded by OpenCV.")
+        raise HTTPException(
+            status_code=422,
+            detail="image could not be decoded by OpenCV.",
+        )
 
     extent = parse_extent3857(extent3857)
-    return request.app.state.predictor.predict(decoded, extent)
+
+    predictions, annotated_image = request.app.state.predictor.predict(
+        decoded,
+        extent,
+    )
+
+    return {"predictions": predictions, "annotated_image": annotated_image}
