@@ -25,8 +25,11 @@ OVERLAY_COLORS: dict[str, tuple[int, int, int]] = {
 }
 OVERLAY_FILL_ALPHA = 0.35
 
-# 550W module footprint and a conservative allowance for spacing/placement.
-PANEL_AREA_M2 = 2.58
+# Solar panel dimensions in metres. The calculated area is used for the
+# estimated panel count, so changing either dimension updates the simulation.
+PANEL_WIDTH_M = 2.465
+PANEL_HEIGHT_M = 1.134
+PANEL_AREA_M2 = PANEL_WIDTH_M * PANEL_HEIGHT_M  # 2.7953
 PACKING_FACTOR = 0.90
 
 
