@@ -25,11 +25,7 @@ OVERLAY_COLORS: dict[str, tuple[int, int, int]] = {
 }
 OVERLAY_FILL_ALPHA = 0.35
 
-# The VWorld static map API always stamps a "V-WORLD" attribution logo in the
-# bottom-left corner at a fixed pixel size regardless of image content. YOLO
-# occasionally misclassifies that logo as a building/land polygon, so any
-# detection whose bounding box mostly falls inside this fixed corner region is
-# dropped before it reaches the candidate list or the annotated overlay.
+
 WATERMARK_WIDTH_FRACTION = 0.24
 WATERMARK_HEIGHT_FRACTION = 0.10
 WATERMARK_OVERLAP_THRESHOLD = 0.5
