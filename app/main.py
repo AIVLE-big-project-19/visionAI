@@ -4,7 +4,6 @@ import json
 from contextlib import asynccontextmanager
 from typing import Annotated, Any
 
-import httpx
 import cv2
 import numpy as np
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile, status
@@ -33,6 +32,13 @@ class Prediction(BaseModel):
         description="Shortest distance from a land polygon to a detected building, in metres."
     )
     model_version: str
+
+
+class PredictResponse(BaseModel):
+    predictions: list[Prediction]
+    annotated_image: str = Field(
+        description="Base64-encoded PNG of the input image with detected polygons overlaid."
+    )
 
 
 @asynccontextmanager
@@ -74,12 +80,12 @@ def parse_extent3857(value: str) -> Extent3857:
         ) from exc
 
 
-@app.post("/predict", response_model=list[Prediction])
+@app.post("/predict", response_model=PredictResponse)
 async def predict(
     request: Request,
     image: Annotated[UploadFile, File(description="PNG/JPEG map image")],
     extent3857: Annotated[str, Form(description="Map extent in EPSG:3857")],
-) -> list[dict[str, Any]]:
+) -> dict[str, Any]:
 
     if image.content_type and not image.content_type.startswith("image/"):
         raise HTTPException(
@@ -105,30 +111,9 @@ async def predict(
 
     extent = parse_extent3857(extent3857)
 
-    # 1. Vision AI 실행
-    vision_result = request.app.state.predictor.predict(
+    predictions, annotated_image = request.app.state.predictor.predict(
         decoded,
         extent,
     )
 
-    print("[VISION] 추론 결과:", vision_result)
-
-    # 2. Ranking 서버로 Vision JSON 전달
-    ranking_url = "http://127.0.0.1:8002/analyze/vision-json"
-
-    try:
-        async with httpx.AsyncClient(timeout=120.0) as client:
-            ranking_response = await client.post(
-                ranking_url,
-                json=vision_result,
-            )
-
-        print("[RANKING] 상태 코드:", ranking_response.status_code)
-        print("[RANKING] 응답 내용:", ranking_response.text)
-
-    except httpx.RequestError as exc:
-        # Ranking 서버 전송 실패가 Vision API 자체를 죽이지 않게 함
-        print("[RANKING] 연결 실패:", exc)
-
-    # 3. 원래 API 구조 그대로 Vision 결과 반환
-    return vision_result
+    return {"predictions": predictions, "annotated_image": annotated_image}

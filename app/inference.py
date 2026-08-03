@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 from dataclasses import dataclass
 from threading import Lock
 from typing import Any
@@ -15,6 +16,23 @@ from .config import Settings
 
 # Kept from the existing notebook: only these detected classes are candidates.
 INSTALLABLE = {"building", "parking_lot", "land"}
+
+# BGR colors per candidate_type, used for the annotated overlay image.
+OVERLAY_COLORS: dict[str, tuple[int, int, int]] = {
+    "building": (255, 0, 0),
+    "land": (0, 200, 0),
+    "parking_lot": (0, 200, 255),
+}
+OVERLAY_FILL_ALPHA = 0.35
+
+# The VWorld static map API always stamps a "V-WORLD" attribution logo in the
+# bottom-left corner at a fixed pixel size regardless of image content. YOLO
+# occasionally misclassifies that logo as a building/land polygon, so any
+# detection whose bounding box mostly falls inside this fixed corner region is
+# dropped before it reaches the candidate list or the annotated overlay.
+WATERMARK_WIDTH_FRACTION = 0.24
+WATERMARK_HEIGHT_FRACTION = 0.10
+WATERMARK_OVERLAP_THRESHOLD = 0.5
 
 
 @dataclass(frozen=True)
@@ -42,7 +60,10 @@ class YoloSegmentationService:
         # access to the same PyTorch model instance in multi-request deployments.
         self._predict_lock = Lock()
 
-    def predict(self, image: np.ndarray, extent: Extent3857) -> list[dict[str, Any]]:
+    def predict(
+        self, image: np.ndarray, extent: Extent3857
+    ) -> tuple[list[dict[str, Any]], str]:
+        """Returns (candidates, annotated_image_base64_png)."""
         height, width = image.shape[:2]
         if height == 0 or width == 0:
             raise ValueError("The uploaded image has no pixels.")
@@ -56,7 +77,7 @@ class YoloSegmentationService:
 
         result = results[0]
         if result.masks is None or result.boxes is None:
-            return []
+            return [], self._encode_annotated(image, [])
 
         polygons = result.masks.xy
         classes = result.boxes.cls.cpu().numpy()
@@ -72,6 +93,8 @@ class YoloSegmentationService:
 
         for polygon, class_id in zip(polygons, classes):
             detected_type = result.names[int(class_id)]
+            if self._overlaps_watermark(polygon.astype(np.int32), width, height):
+                continue
             pixel_geometry = self._to_geometry(polygon)
             map_geometry = self._to_geometry(
                 self._to_3857_polygon(polygon, width, height, extent)
@@ -86,6 +109,8 @@ class YoloSegmentationService:
                 building_polygons_px.append(pixel_geometry)
                 building_polygons_m.append(map_geometry)
 
+        annotated_polygons_px: list[tuple[np.ndarray, str]] = []
+
         for polygon, class_id, confidence in zip(polygons, classes, confidences):
             candidate_type = result.names[int(class_id)]
             if candidate_type not in INSTALLABLE or float(confidence) < self._settings.min_confidence:
@@ -93,9 +118,13 @@ class YoloSegmentationService:
 
             # This is the same area filter used in the notebook.
             polygon_int = polygon.astype(np.int32)
+            if self._overlaps_watermark(polygon_int, width, height):
+                continue
             pixel_area = float(cv2.contourArea(polygon_int))
             if pixel_area < self._settings.min_pixel_area:
                 continue
+
+            annotated_polygons_px.append((polygon_int, candidate_type))
 
             distance_to_road_px: float | None = None
             distance_to_building_px: float | None = None
@@ -142,7 +171,29 @@ class YoloSegmentationService:
                 }
             )
 
-        return candidates
+        return candidates, self._encode_annotated(image, annotated_polygons_px)
+
+    @classmethod
+    def _encode_annotated(
+        cls, image: np.ndarray, polygons_px: list[tuple[np.ndarray, str]]
+    ) -> str:
+        annotated = image.copy()
+        if polygons_px:
+            overlay = image.copy()
+            for polygon_int, candidate_type in polygons_px:
+                color = OVERLAY_COLORS.get(candidate_type, (255, 255, 255))
+                cv2.fillPoly(overlay, [polygon_int], color)
+            annotated = cv2.addWeighted(
+                overlay, OVERLAY_FILL_ALPHA, annotated, 1 - OVERLAY_FILL_ALPHA, 0
+            )
+            for polygon_int, candidate_type in polygons_px:
+                color = OVERLAY_COLORS.get(candidate_type, (255, 255, 255))
+                cv2.polylines(annotated, [polygon_int], isClosed=True, color=color, thickness=2)
+
+        success, buffer = cv2.imencode(".png", annotated)
+        if not success:
+            return ""
+        return base64.b64encode(buffer).decode("ascii")
 
     @staticmethod
     def _real_area(pixel_area: float, width: int, height: int, extent: Extent3857) -> float:
@@ -174,3 +225,21 @@ class YoloSegmentationService:
     @staticmethod
     def _round_or_none(value: float | None) -> float | None:
         return None if value is None else round(value, 2)
+
+    @staticmethod
+    def _overlaps_watermark(polygon_int: np.ndarray, width: int, height: int) -> bool:
+        """True if most of the polygon's bounding box sits in the fixed
+        bottom-left corner where VWorld stamps its "V-WORLD" attribution logo.
+        """
+        box_x, box_y, box_w, box_h = cv2.boundingRect(polygon_int)
+        if box_w <= 0 or box_h <= 0:
+            return False
+
+        watermark_x_max = width * WATERMARK_WIDTH_FRACTION
+        watermark_y_min = height * (1 - WATERMARK_HEIGHT_FRACTION)
+
+        overlap_x = min(box_x + box_w, watermark_x_max) - max(box_x, 0.0)
+        overlap_y = min(box_y + box_h, float(height)) - max(box_y, watermark_y_min)
+        overlap_area = max(0.0, overlap_x) * max(0.0, overlap_y)
+
+        return (overlap_area / (box_w * box_h)) > WATERMARK_OVERLAP_THRESHOLD
