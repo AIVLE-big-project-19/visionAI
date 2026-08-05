@@ -74,6 +74,9 @@ class YoloSegmentationService:
         valid_panels = [panel for panel in panel_layout if panel["valid"]]
         real_area = parcel.parcel_area_m2
         usable_area = real_area * float(shape["shape_efficiency"])
+        # The estimate is constrained by usable area, not by the number of
+        # grid positions generated for visualization.
+        estimated_panel_count = int(usable_area / (PANEL_WIDTH_M * PANEL_HEIGHT_M))
 
         candidate = {
             "candidate_type": candidate_type,
@@ -87,7 +90,7 @@ class YoloSegmentationService:
             "distance_to_building_m": self._min_distance(parcel.geometry_3857, buildings, "map"),
             "shape_score": shape["shape_score"], "shape_grade": shape["shape_grade"],
             "shape_efficiency": shape["shape_efficiency"], "recommended_layout": shape["recommended_layout"],
-            "usable_area": round(usable_area, 2), "estimated_panel_count": len(valid_panels),
+            "usable_area": round(usable_area, 2), "estimated_panel_count": estimated_panel_count,
             "model_version": self._settings.model_version,
             "candidate_id": parcel.candidate_id, "pnu": parcel.pnu, "address": parcel.address,
             "panel_layout": panel_layout, "valid_panel_count": len(valid_panels),
