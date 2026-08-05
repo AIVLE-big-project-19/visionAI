@@ -43,6 +43,13 @@ class Prediction(BaseModel):
     estimated_panel_count: int = Field(
         description="Estimated count of 550W panels that fit in the usable area."
     )
+    candidate_id: str | None = None
+    pnu: str | None = None
+    address: str | None = None
+    panel_layout: list[dict[str, Any]] | None = None
+    valid_panel_count: int | None = None
+    removed_panel_count: int | None = None
+    installed_area: float | None = None
     model_version: str
 
 
