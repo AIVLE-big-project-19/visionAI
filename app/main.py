@@ -15,21 +15,22 @@ from .inference import Extent3857, YoloSegmentationService
 
 class Prediction(BaseModel):
     candidate_type: str
+    detected_type: str
     confidence: float = Field(ge=0, le=1)
     polygon: list[list[float]] = Field(description="Segmentation vertices in EPSG:3857 [x, y].")
     pixel_area: float
     real_area: float = Field(description="Area in square metres, calculated from extent3857.")
     distance_to_road_px: float | None = Field(
-        description="Shortest distance from a land polygon to a detected road, in pixels."
+        description="Shortest distance from a candidate polygon to a detected road, in pixels."
     )
     distance_to_building_px: float | None = Field(
-        description="Shortest distance from a land polygon to a detected building, in pixels."
+        description="Shortest distance from a candidate polygon to a detected building, in pixels."
     )
     distance_to_road_m: float | None = Field(
-        description="Shortest distance from a land polygon to a detected road, in metres."
+        description="Shortest distance from a candidate polygon to a detected road, in metres."
     )
     distance_to_building_m: float | None = Field(
-        description="Shortest distance from a land polygon to a detected building, in metres."
+        description="Shortest distance from a candidate polygon to a detected building, in metres."
     )
     shape_score: float = Field(description="Panel-placement suitability score based on polygon shape.")
     shape_grade: str = Field(description="Shape suitability grade from A (best) to E.")

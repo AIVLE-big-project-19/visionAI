@@ -65,21 +65,25 @@ class YoloSegmentationService:
         masks = self._environment_masks(result, width, height, extent)
         class_masks = [item for item in masks if item["type"] in INSTALLABLE]
         best = self._best_type(candidate_px, class_masks)
-        candidate_type, confidence = best if best else ("land", 0.0)
+        detected_type, confidence = best if best else ("land", 0.0)
 
         roads = [item for item in masks if item["type"] == "road"]
-        buildings = [item for item in masks if item["type"] == "building"]
+        buildings = (
+            [] if parcel.candidate_type == "building"
+            else [item for item in masks if item["type"] == "building"]
+        )
         shape = self._shape(parcel.geometry_5179)
-        panel_layout = self._layout(candidate_px, width, height, extent, roads, buildings, candidate_type)
+        panel_layout = self._layout(candidate_px, width, height, extent, roads, buildings, detected_type)
         valid_panels = [panel for panel in panel_layout if panel["valid"]]
-        real_area = parcel.parcel_area_m2
+        real_area = parcel.candidate_area_m2
         usable_area = real_area * float(shape["shape_efficiency"])
         # The estimate is constrained by usable area, not by the number of
         # grid positions generated for visualization.
         estimated_panel_count = int(usable_area / (PANEL_WIDTH_M * PANEL_HEIGHT_M))
 
         candidate = {
-            "candidate_type": candidate_type,
+            "candidate_type": parcel.candidate_type,
+            "detected_type": detected_type,
             "confidence": round(confidence, 4),
             "polygon": self._outer_boundary(parcel.geometry_3857),
             "pixel_area": round(float(candidate_px.area), 2),
