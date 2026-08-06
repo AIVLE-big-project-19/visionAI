@@ -23,6 +23,8 @@ INSTALLABLE = {"building", "parking_lot", "land"}
 PANEL_WIDTH_M, PANEL_HEIGHT_M = 2.465, 1.134
 PANEL_GAP_M, EDGE_MARGIN_M = 0.2, 0.4
 ROAD_CLEARANCE_PX, BUILDING_CLEARANCE_PX = 20.0, 10.0
+# VWorld Building Polygon과 항공영상 사이의 위치 오차를 보정하기 위한 Spatial Matching.
+SPATIAL_TOLERANCE_M = 5.0
 DEBUG_DIR = Path(__file__).resolve().parent.parent / "debug"
 
 
@@ -68,12 +70,15 @@ class YoloSegmentationService:
         detected_type, confidence = best if best else ("land", 0.0)
 
         roads = [item for item in masks if item["type"] == "road"]
-        buildings = (
-            [] if parcel.candidate_type == "building"
-            else [item for item in masks if item["type"] == "building"]
-        )
+        buildings = [item for item in masks if item["type"] == "building"]
+        building_obstacles = buildings
+        if parcel.candidate_type == "building":
+            building_obstacles = [
+                item for item in buildings
+                if not parcel.geometry_3857.buffer(SPATIAL_TOLERANCE_M).intersects(item["map"])
+            ]
         shape = self._shape(parcel.geometry_5179)
-        panel_layout = self._layout(candidate_px, width, height, extent, roads, buildings, detected_type)
+        panel_layout = self._layout(candidate_px, width, height, extent, roads, building_obstacles, detected_type)
         valid_panels = [panel for panel in panel_layout if panel["valid"]]
         real_area = parcel.candidate_area_m2
         usable_area = real_area * float(shape["shape_efficiency"])
@@ -91,7 +96,12 @@ class YoloSegmentationService:
             "distance_to_road_px": self._min_distance(candidate_px, roads, "px"),
             "distance_to_building_px": self._min_distance(candidate_px, buildings, "px"),
             "distance_to_road_m": self._min_distance(parcel.geometry_3857, roads, "map"),
-            "distance_to_building_m": self._min_distance(parcel.geometry_3857, buildings, "map"),
+            "distance_to_building_m": self._min_distance(
+                parcel.geometry_3857,
+                buildings,
+                "map",
+                SPATIAL_TOLERANCE_M if parcel.candidate_type == "building" else 0.0,
+            ),
             "shape_score": shape["shape_score"], "shape_grade": shape["shape_grade"],
             "shape_efficiency": shape["shape_efficiency"], "recommended_layout": shape["recommended_layout"],
             "usable_area": round(usable_area, 2), "estimated_panel_count": estimated_panel_count,
@@ -155,8 +165,10 @@ class YoloSegmentationService:
         return {"shape_score": score, "shape_grade": grade, "shape_efficiency": round(efficiency, 3), "recommended_layout": "Landscape" if maxx-minx >= maxy-miny else "Portrait"}
 
     @staticmethod
-    def _min_distance(geometry: BaseGeometry, masks: list[dict[str, Any]], key: str, default: Any = 0) -> float | None:
+    def _min_distance(geometry: BaseGeometry, masks: list[dict[str, Any]], key: str, tolerance: float = 0.0) -> float | None:
         if not masks: return None
+        if tolerance and any(geometry.buffer(tolerance).intersects(mask[key]) for mask in masks):
+            return 0.0
         values = [geometry.distance(mask[key]) for mask in masks]
         return round(float(min(values)), 2)
 
