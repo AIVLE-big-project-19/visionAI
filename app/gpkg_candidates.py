@@ -18,11 +18,17 @@ CANDIDATE_GPKG_PATH = PROJECT_DIR / "data" / "candidate_parcels.gpkg"
 @dataclass(frozen=True)
 class CandidateParcel:
     candidate_id: str
+    candidate_type: str
     geometry_5179: BaseGeometry
     geometry_3857: BaseGeometry
-    parcel_area_m2: float
-    pnu: str
+    candidate_area_m2: float
+    pnu: str | None
     address: str
+
+    @property
+    def parcel_area_m2(self) -> float:
+        """Compatibility name used by the existing inference calculation."""
+        return self.candidate_area_m2
 
 
 class CandidateParcelRepository:
@@ -38,12 +44,13 @@ class CandidateParcelRepository:
                 "WHERE data_type = 'features' LIMIT 1"
             ).fetchone()
             rows = connection.execute(
-                f'SELECT geom, source_id_ml, parcel_area_m2, pnu, addr FROM "{table_name}"'
+                f'SELECT geom, candidate_id, candidate_type, candidate_area_m2, pnu, address '
+                f'FROM "{table_name}"'
             ).fetchall()
 
         transformer = Transformer.from_crs(source_srs_id, 3857, always_xy=True)
         self._parcels: list[CandidateParcel] = []
-        for geometry_blob, source_id, parcel_area, pnu, address in rows:
+        for geometry_blob, candidate_id, candidate_type, candidate_area, pnu, address in rows:
             geometry_5179 = _read_gpkg_geometry(geometry_blob)
             if geometry_5179.is_empty:
                 continue
@@ -53,14 +60,14 @@ class CandidateParcelRepository:
                 continue
 
             geometry_3857 = transform(transformer.transform, geometry_5179)
-            candidate_id = str(source_id or pnu)
             self._parcels.append(
                 CandidateParcel(
-                    candidate_id=candidate_id,
+                    candidate_id=str(candidate_id or pnu or ""),
+                    candidate_type=str(candidate_type or "land"),
                     geometry_5179=geometry_5179,
                     geometry_3857=geometry_3857,
-                    parcel_area_m2=float(parcel_area or geometry_5179.area),
-                    pnu=str(pnu or ""),
+                    candidate_area_m2=float(candidate_area or geometry_5179.area),
+                    pnu=str(pnu) if pnu is not None else None,
                     address=str(address or ""),
                 )
             )
