@@ -26,6 +26,8 @@ ROAD_CLEARANCE_PX, BUILDING_CLEARANCE_PX = 20.0, 10.0
 # VWorld Building Polygon과 항공영상 사이의 위치 오차를 보정하기 위한 Spatial Matching.
 SPATIAL_TOLERANCE_M = 5.0
 DEBUG_DIR = Path(__file__).resolve().parent.parent / "debug"
+FINAL_IMAGE_SIZE = (480, 408)
+FINAL_IMAGE_JPEG_QUALITY = 80
 
 
 @dataclass(frozen=True)
@@ -51,18 +53,16 @@ class YoloSegmentationService:
         self._parcels = CandidateParcelRepository()
         self._predict_lock = Lock()
 
-    def predict(self, image: np.ndarray, extent: Extent3857) -> tuple[list[dict[str, Any]], str, str]:
+    def predict(self, image: np.ndarray, extent: Extent3857) -> tuple[list[dict[str, Any]], str]:
         height, width = image.shape[:2]
         debug_id = self._new_debug_id()
         parcel = self._parcels.select_one(extent.min_x, extent.min_y, extent.max_x, extent.max_y)
         if parcel is None:
-            encoded_image = self._encode(image)
-            return [], encoded_image, encoded_image
+            return [], self._encode(image, size=FINAL_IMAGE_SIZE, extension=".jpg")
 
         candidate_px = self._map_to_pixel(parcel.geometry_3857, width, height, extent)
         if candidate_px.is_empty or candidate_px.area < self._settings.min_pixel_area:
-            encoded_image = self._encode(image)
-            return [], encoded_image, encoded_image
+            return [], self._encode(image, size=FINAL_IMAGE_SIZE, extension=".jpg")
 
         with self._predict_lock:
             result = self._model.predict(image, conf=self._settings.min_confidence, verbose=False)[0]
@@ -115,7 +115,7 @@ class YoloSegmentationService:
         }
         final_visualization = self._draw_final(image, candidate_px, masks, candidate)
         self._save_debug(debug_id, "final_visualization", final_visualization)
-        return [candidate], self._encode(image, candidate_px, panel_layout), self._encode(final_visualization)
+        return [candidate], self._encode(final_visualization, size=FINAL_IMAGE_SIZE, extension=".jpg")
 
     def _environment_masks(self, result: Any, width: int, height: int, extent: Extent3857) -> list[dict[str, Any]]:
         if result.masks is None or result.boxes is None:
@@ -191,11 +191,20 @@ class YoloSegmentationService:
         return [[round(x, 3), round(y, 3)] for x, y in polygon.exterior.coords]
 
     @staticmethod
-    def _encode(image: np.ndarray, candidate: BaseGeometry | None = None, panels: list[dict[str, Any]] | None = None) -> str:
+    def _encode(
+        image: np.ndarray,
+        candidate: BaseGeometry | None = None,
+        panels: list[dict[str, Any]] | None = None,
+        size: tuple[int, int] | None = None,
+        extension: str = ".png",
+    ) -> str:
         output = image.copy()
         if candidate is not None:
             cv2.polylines(output, [np.asarray(candidate.exterior.coords if candidate.geom_type == "Polygon" else max(candidate.geoms, key=lambda p:p.area).exterior.coords, dtype=np.int32)], True, (0, 255, 0), 2)
-        success, buffer = cv2.imencode(".png", output)
+        if size is not None:
+            output = cv2.resize(output, size, interpolation=cv2.INTER_AREA)
+        params = [cv2.IMWRITE_JPEG_QUALITY, FINAL_IMAGE_JPEG_QUALITY] if extension == ".jpg" else []
+        success, buffer = cv2.imencode(extension, output, params)
         return base64.b64encode(buffer).decode("ascii") if success else ""
 
     @staticmethod
