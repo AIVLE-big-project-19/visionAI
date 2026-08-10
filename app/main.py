@@ -56,11 +56,8 @@ class Prediction(BaseModel):
 
 class PredictResponse(BaseModel):
     predictions: list[Prediction]
-    annotated_image: str = Field(
-        description="Base64-encoded PNG of the input image with detected polygons overlaid."
-    )
     final_visualization_image: str = Field(
-        description="Base64-encoded PNG of the final visualization including valid solar panels."
+        description="Base64-encoded 480x408 JPEG of the final visualization including valid solar panels."
     )
 
 
@@ -134,13 +131,12 @@ async def predict(
 
     extent = parse_extent3857(extent3857)
 
-    predictions, annotated_image, final_visualization_image = request.app.state.predictor.predict(
+    predictions, final_visualization_image = request.app.state.predictor.predict(
         decoded,
         extent,
     )
 
     return {
         "predictions": predictions,
-        "annotated_image": annotated_image,
         "final_visualization_image": final_visualization_image,
     }
