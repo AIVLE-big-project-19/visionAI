@@ -51,16 +51,18 @@ class YoloSegmentationService:
         self._parcels = CandidateParcelRepository()
         self._predict_lock = Lock()
 
-    def predict(self, image: np.ndarray, extent: Extent3857) -> tuple[list[dict[str, Any]], str]:
+    def predict(self, image: np.ndarray, extent: Extent3857) -> tuple[list[dict[str, Any]], str, str]:
         height, width = image.shape[:2]
         debug_id = self._new_debug_id()
         parcel = self._parcels.select_one(extent.min_x, extent.min_y, extent.max_x, extent.max_y)
         if parcel is None:
-            return [], self._encode(image)
+            encoded_image = self._encode(image)
+            return [], encoded_image, encoded_image
 
         candidate_px = self._map_to_pixel(parcel.geometry_3857, width, height, extent)
         if candidate_px.is_empty or candidate_px.area < self._settings.min_pixel_area:
-            return [], self._encode(image)
+            encoded_image = self._encode(image)
+            return [], encoded_image, encoded_image
 
         with self._predict_lock:
             result = self._model.predict(image, conf=self._settings.min_confidence, verbose=False)[0]
@@ -111,12 +113,9 @@ class YoloSegmentationService:
             "removed_panel_count": len(panel_layout) - len(valid_panels),
             "installed_area": round(len(valid_panels) * PANEL_WIDTH_M * PANEL_HEIGHT_M, 2),
         }
-        self._save_debug(
-            debug_id,
-            "final_visualization",
-            self._draw_final(image, candidate_px, masks, candidate),
-        )
-        return [candidate], self._encode(image, candidate_px, panel_layout)
+        final_visualization = self._draw_final(image, candidate_px, masks, candidate)
+        self._save_debug(debug_id, "final_visualization", final_visualization)
+        return [candidate], self._encode(image, candidate_px, panel_layout), self._encode(final_visualization)
 
     def _environment_masks(self, result: Any, width: int, height: int, extent: Extent3857) -> list[dict[str, Any]]:
         if result.masks is None or result.boxes is None:
