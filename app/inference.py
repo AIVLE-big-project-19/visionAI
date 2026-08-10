@@ -262,29 +262,12 @@ class YoloSegmentationService:
         """Render already-calculated data only; this method changes no analysis result."""
         output = image.copy()
         colors = {
-            "building": (0, 0, 255),  # Red (BGR)
-            "road": (0, 255, 255),  # Yellow
-            "parking_lot": (255, 0, 0),  # Blue
-            "candidate": (0, 255, 0),  # Green
-            "valid_panel": (255, 255, 0),  # Cyan
+            "candidate": (0, 0, 255),  # Red (BGR)
+            "valid_panel": (70, 160, 60),  # Green
         }
 
-        # Overlay 2: surrounding YOLO segmentation polygons.
-        for mask in masks:
-            if mask["type"] not in {"building", "road", "parking_lot"}:
-                continue
-            geometry = mask["px"]
-            polygon = geometry if geometry.geom_type == "Polygon" else max(geometry.geoms, key=lambda item: item.area)
-            cv2.polylines(
-                output,
-                [np.asarray(polygon.exterior.coords, dtype=np.int32)],
-                True,
-                colors[mask["type"]],
-                2,
-            )
-
-        # Overlay 3: show valid panels only. Invalid panels remain in JSON but
-        # are intentionally omitted from the final visualization.
+        # Show valid panels only. YOLO masks and removed panels remain available
+        # to the analysis/JSON, but are intentionally omitted from this image.
         for panel in candidate["panel_layout"]:
             if not panel["valid"]:
                 continue
@@ -294,40 +277,28 @@ class YoloSegmentationService:
             cv2.rectangle(output, (x, y), (x + panel["width"], y + panel["height"]), colors["valid_panel"], -1)
             cv2.rectangle(output, (x, y), (x + panel["width"], y + panel["height"]), (255, 255, 255), 1)
 
-        # Overlay 1: GPKG candidate boundary.
+        # GPKG candidate boundary.
         polygon = candidate_geometry if candidate_geometry.geom_type == "Polygon" else max(candidate_geometry.geoms, key=lambda item: item.area)
         exterior = np.asarray(polygon.exterior.coords, dtype=np.int32)
         cv2.polylines(output, [exterior], True, colors["candidate"], 3)
 
-        # Overlay 5: information box.
+        # Top-left analysis summary. Keep this limited to the five user-facing
+        # metrics needed in the final image.
         info_lines = [
-            f"Candidate ID: {candidate.get('candidate_id') or '-'}",
-            f"Area: {candidate['real_area']:.2f} m2",
-            f"Usable Area: {candidate['usable_area']:.2f} m2",
+            "Analysis Summary",
+            f"Area (m2): {candidate['real_area']:.2f}",
+            f"Usable Area (m2): {candidate['usable_area']:.2f}",
             f"Panel Count: {candidate['estimated_panel_count']}",
-            f"Road Distance: {cls._distance_text(candidate['distance_to_road_m'])}",
-            f"Building Distance: {cls._distance_text(candidate['distance_to_building_m'])}",
-            f"Shape Grade: {candidate['shape_grade']}",
+            f"Road Distance (m): {cls._distance_text(candidate['distance_to_road_m'])}",
+            f"Building Distance (m): {cls._distance_text(candidate['distance_to_building_m'])}",
         ]
-        box_width, line_height = 365, 25
+        box_width, line_height = 300, 25
         box_height = 16 + len(info_lines) * line_height
         cv2.rectangle(output, (10, 10), (10 + box_width, 10 + box_height), (20, 20, 20), -1)
         for index, text in enumerate(info_lines):
-            cv2.putText(output, text, (20, 34 + index * line_height), cv2.FONT_HERSHEY_SIMPLEX, 0.58, (255, 255, 255), 1, cv2.LINE_AA)
-
-        # Overlay 6: legend.
-        legend_items = [
-            ("Building", colors["building"]), ("Road", colors["road"]),
-            ("Parking", colors["parking_lot"]), ("Candidate Polygon", colors["candidate"]),
-            ("Valid Panel", colors["valid_panel"]),
-        ]
-        legend_x = max(10, output.shape[1] - 215)
-        legend_y = 10
-        cv2.rectangle(output, (legend_x, legend_y), (legend_x + 205, legend_y + 25 * len(legend_items) + 12), (20, 20, 20), -1)
-        for index, (name, color) in enumerate(legend_items):
-            y = legend_y + 22 + index * 25
-            cv2.line(output, (legend_x + 12, y), (legend_x + 42, y), color, 4)
-            cv2.putText(output, name, (legend_x + 52, y + 5), cv2.FONT_HERSHEY_SIMPLEX, 0.52, (255, 255, 255), 1, cv2.LINE_AA)
+            font_scale = 0.62 if index == 0 else 0.54
+            thickness = 2 if index == 0 else 1
+            cv2.putText(output, text, (20, 34 + index * line_height), cv2.FONT_HERSHEY_SIMPLEX, font_scale, (255, 255, 255), thickness, cv2.LINE_AA)
         return output
 
     @staticmethod
