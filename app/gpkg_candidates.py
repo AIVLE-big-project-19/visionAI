@@ -27,12 +27,12 @@ class CandidateParcel:
 
     @property
     def parcel_area_m2(self) -> float:
-        """Compatibility name used by the existing inference calculation."""
+        """기존 추론 코드와의 호환성을 위한 면적 별칭입니다."""
         return self.candidate_area_m2
 
 
 class CandidateParcelRepository:
-    """Loads the GPKG candidate source once and selects one parcel per extent."""
+    """GPKG 후보지의 데이터를 한 번 불러와 extent별 후보지를 선택합니다."""
 
     def __init__(self, gpkg_path: Path = CANDIDATE_GPKG_PATH) -> None:
         if not gpkg_path.is_file():
@@ -73,7 +73,7 @@ class CandidateParcelRepository:
             )
 
     def select_one(self, min_x: float, min_y: float, max_x: float, max_y: float) -> CandidateParcel | None:
-        """Choose the parcel nearest the requested map centre among intersecting parcels."""
+        """요청 extent와 교차하는 후보지 중 중심점에 가장 가까운 하나를 선택합니다."""
         requested_extent = box(min_x, min_y, max_x, max_y)
         matching = [
             parcel for parcel in self._parcels if parcel.geometry_3857.intersects(requested_extent)
@@ -85,7 +85,7 @@ class CandidateParcelRepository:
 
 
 def _read_gpkg_geometry(geometry_blob: bytes) -> BaseGeometry:
-    """Extract standard WKB from a GeoPackage geometry binary."""
+    """GeoPackage geometry binary에서 표준 WKB geometry를 추론합니다."""
     if geometry_blob[:2] != b"GP":
         raise RuntimeError("Invalid GeoPackage geometry header.")
     envelope_indicator = (geometry_blob[3] >> 1) & 0b111
