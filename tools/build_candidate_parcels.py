@@ -1,6 +1,6 @@
-"""Build a unified land/building candidate GeoPackage without altering polygons.
+"""Polygon을 변경하지 않고 토지, 건물 후보지를 하나의 GeoPackage로 통합합니다.
 
-Example (from the project root):
+    프로젝트 루트에서의 실행 예시:
     python tools/build_candidate_parcels.py
 """
 
@@ -19,8 +19,8 @@ DEFAULT_BUILDING_PATH = Path(r"C:\Users\User\Downloads\Building_Test_Chungcheong
 DEFAULT_OUTPUT_PATH = PROJECT_DIR / "data" / "candidate_parcels.gpkg"
 TARGET_CRS = "EPSG:5179"
 
-# Source columns used only to create the unified common fields.  They are not
-# copied again under their old, conflicting names (addr/address_ml, etc.).
+# 공통 컬럼을 만들기 위해서만 사용하는 원본 컬럼
+# 이름이 충돌하는 기존 컬럼(addr, address_ml 등)은 별도로 유지하지 않음
 LAND_ALIAS_COLUMNS = {"addr", "query_longitude", "query_latitude", "parcel_area_m2"}
 BUILDING_ALIAS_COLUMNS = {
     "address_ml",
@@ -41,11 +41,10 @@ COMMON_COLUMNS = [
 
 
 def _candidate_ids(gdf: gpd.GeoDataFrame, candidate_type: str) -> pd.Series:
-    """Make IDs unique even if land and building source IDs overlap."""
+    """토지와 건물 간 원본 ID가 겹쳐도 고유한 후보지 ID를 생성합니다."""
     fallback = gdf.get("pnu", pd.Series(gdf.index.astype(str), index=gdf.index)).astype(str)
     source_id = gdf["source_id_ml"].where(gdf["source_id_ml"].notna(), fallback).astype(str)
-    # source_id_ml is not guaranteed unique within a source file, so retain the
-    # source row position as a deterministic final component.
+    # source_id_ml은 원본 파일 내부에서 고유하지 않을 수 있으므로 원본 행 순서를 마지막 구성 요소로 추가함
     row_position = pd.Series(range(len(gdf)), index=gdf.index).astype(str)
     return candidate_type + ":" + source_id + ":" + row_position
 
@@ -62,8 +61,8 @@ def _prepare_land(land: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
 
 
 def _prepare_building(building: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
-    # to_crs changes coordinate values only; it preserves every polygon's shape
-    # and feature boundaries (no buffer, simplify, dissolve, or other geometry edit).
+    # to_crs는 좌표값만 반환
+    # polygon의 형상과 feature 경계는 유지되며 dissolve·simplify·buffer 등 geometry를 변경하는 연산은 수행하지 않음
     result = building.to_crs(TARGET_CRS) if building.crs != TARGET_CRS else building.copy()
     result["candidate_id"] = _candidate_ids(result, "building")
     result["candidate_type"] = "building"
@@ -90,8 +89,8 @@ def build_candidate_parcels(
     land = _prepare_land(land)
     building = _prepare_building(building)
 
-    # concat creates the union of source-specific columns.  Values that belong
-    # only to the other candidate type naturally remain NULL in the GeoPackage.
+    # concat은 토지, 건물 전용 컬럼을 모두 포함하는 컬럼 합집합을 생성함
+    # 바대 유형에만 존재하는 전용 컬럼은 GeoPackage에서 NULL로 저장됨
     merged = gpd.GeoDataFrame(
         pd.concat([land, building], ignore_index=True, sort=False),
         geometry="geometry",

@@ -23,8 +23,10 @@ INSTALLABLE = {"building", "parking_lot", "land"}
 PANEL_WIDTH_M, PANEL_HEIGHT_M = 2.465, 1.134
 PANEL_GAP_M, EDGE_MARGIN_M = 0.2, 0.4
 ROAD_CLEARANCE_PX, BUILDING_CLEARANCE_PX = 20.0, 10.0
-# VWorld Building Polygon과 항공영상 사이의 위치 오차를 보정하기 위한 Spatial Matching.
+
+# VWorld Building Polygon과 항공영상 사이의 위치 오차를 보정하기 위한 공간 매칭 허용 오차
 SPATIAL_TOLERANCE_M = 5.0
+
 DEBUG_DIR = Path(__file__).resolve().parent.parent / "debug"
 FINAL_IMAGE_SIZE = (480, 408)
 FINAL_IMAGE_JPEG_QUALITY = 80
@@ -39,11 +41,11 @@ class Extent3857:
 
     def validate(self) -> None:
         if self.min_x >= self.max_x or self.min_y >= self.max_y:
-            raise ValueError("extent3857 must satisfy minX < maxX and minY < maxY.")
+            raise ValueError("extent3857은 minX < maxX 및 minY < maxY 조건을 만족해야 합니다.")
 
 
 class YoloSegmentationService:
-    """One GPKG parcel per request; YOLO analyses only its environment."""
+    """요청당 GPKG 후보지 하나를 선택하고 해당 후보지 주변만 YOLO로 분석합니다."""
 
     def __init__(self, settings: Settings) -> None:
         if not settings.model_path.is_file():
@@ -84,8 +86,7 @@ class YoloSegmentationService:
         valid_panels = [panel for panel in panel_layout if panel["valid"]]
         real_area = parcel.candidate_area_m2
         usable_area = real_area * float(shape["shape_efficiency"])
-        # The estimate is constrained by usable area, not by the number of
-        # grid positions generated for visualization.
+        # 예상 패널 수는 시각화를 위해 생성된 격자 수가 아니라, 사용 가능 면적을 기준으로 계산함
         estimated_panel_count = int(usable_area / (PANEL_WIDTH_M * PANEL_HEIGHT_M))
 
         candidate = {
@@ -166,6 +167,7 @@ class YoloSegmentationService:
     @staticmethod
     def _min_distance(geometry: BaseGeometry, masks: list[dict[str, Any]], key: str, tolerance: float = 0.0) -> float | None:
         if not masks: return None
+        # 허용 오차 범위 안에서 교차하면 동일 객체로 간주하여 거리를 0m로 처리함
         if tolerance and any(geometry.buffer(tolerance).intersects(mask[key]) for mask in masks):
             return 0.0
         values = [geometry.distance(mask[key]) for mask in masks]
@@ -259,15 +261,15 @@ class YoloSegmentationService:
         masks: list[dict[str, Any]],
         candidate: dict[str, Any],
     ) -> np.ndarray:
-        """Render already-calculated data only; this method changes no analysis result."""
+        """이미 계산된 분석 결과만 시각화하며 분석 결과 자체는 변경하지 않습니다."""
         output = image.copy()
         colors = {
             "candidate": (0, 0, 255),  # Red (BGR)
             "valid_panel": (70, 160, 60),  # Green
         }
 
-        # Show valid panels only. YOLO masks and removed panels remain available
-        # to the analysis/JSON, but are intentionally omitted from this image.
+        # 유효 패널만 표시함
+        # YOLO mask와 제외된 패널은 분석 및 JSON에는 유지되지만 최종 시각화 이미지에는 의도적으로 표시하지 않음
         for panel in candidate["panel_layout"]:
             if not panel["valid"]:
                 continue
@@ -277,13 +279,12 @@ class YoloSegmentationService:
             cv2.rectangle(output, (x, y), (x + panel["width"], y + panel["height"]), colors["valid_panel"], -1)
             cv2.rectangle(output, (x, y), (x + panel["width"], y + panel["height"]), (255, 255, 255), 1)
 
-        # GPKG candidate boundary.
+        # GPKG 후보지 경계를 표시함
         polygon = candidate_geometry if candidate_geometry.geom_type == "Polygon" else max(candidate_geometry.geoms, key=lambda item: item.area)
         exterior = np.asarray(polygon.exterior.coords, dtype=np.int32)
         cv2.polylines(output, [exterior], True, colors["candidate"], 3)
 
-        # Top-left analysis summary. Keep this limited to the five user-facing
-        # metrics needed in the final image.
+        # 최종 이미지에 필요한 사용자용 핵심 지표 5개만 좌측 상단에 표시함
         info_lines = [
             "Analysis Summary",
             f"Area (m2): {candidate['real_area']:.2f}",
