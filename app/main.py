@@ -126,7 +126,7 @@ async def predict(
     if decoded is None:
         raise HTTPException(
             status_code=422,
-            detail="OpenCV에서 이미지를 티코딩할 수 없습니다.",
+            detail="OpenCV에서 이미지를 디코딩할 수 없습니다.",
         )
 
     extent = parse_extent3857(extent3857)

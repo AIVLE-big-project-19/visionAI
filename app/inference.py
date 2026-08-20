@@ -268,7 +268,8 @@ class YoloSegmentationService:
             "valid_panel": (70, 160, 60),  # Green
         }
 
-        # 유효 패널만 표시함. YOLO mask와 제외된 패널은 분석 및 JSON에는 유지되지만 최종 시각화 이미지에는 의도적으로 표시하지 않음
+        # 유효 패널만 표시함
+        # YOLO mask와 제외된 패널은 분석 및 JSON에는 유지되지만 최종 시각화 이미지에는 의도적으로 표시하지 않음
         for panel in candidate["panel_layout"]:
             if not panel["valid"]:
                 continue
